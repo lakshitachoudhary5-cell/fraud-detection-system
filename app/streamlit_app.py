@@ -46,15 +46,28 @@ if page == "Single Prediction":
         try:
             result = predictor.predict_single(payload)
             record_id = save_prediction(time_val, amount_val, result)
-            result["db_record_id"] = record_id
             
-            if result.get("is_fraud"):
-                st.error(f"🚨 ALERT: Fraudulent Transaction Detected! (Score: {result.get('anomaly_score', 0):.4f})")
-            else:
-                st.success(f"✅ Transaction Legitimate (Score: {result.get('anomaly_score', 0):.4f})")
+            st.markdown("---")
+            st.subheader("Prediction Results")
             
-            st.write("**Prediction Details:**")
-            st.json(result)
+            # Clean Result UI Cards
+            res_col1, res_col2, res_col3 = st.columns(3)
+            
+            score = result.get('anomaly_score', 0)
+            is_fraud = result.get('is_fraud', False)
+            
+            with res_col1:
+                if is_fraud:
+                    st.error("🚨 FRAUD DETECTED")
+                else:
+                    st.success("✅ LEGITIMATE")
+                    
+            with res_col2:
+                st.metric(label="Anomaly Score", value=f"{score:.4f}")
+                
+            with res_col3:
+                st.metric(label="Database Record ID", value=f"#{record_id}")
+                
         except Exception as e:
             st.error(f"Prediction Error: {e}")
 
