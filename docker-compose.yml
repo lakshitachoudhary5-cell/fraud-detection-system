@@ -1,0 +1,45 @@
+﻿version: '3.8'
+
+services:
+  postgres_db:
+    image: postgres:15-alpine
+    container_name: fraud_postgres_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fraud_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  flask_api:
+    build: .
+    container_name: fraud_flask_api
+    command: python app/main.py
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres_db:5432/fraud_db
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+
+  streamlit_dashboard:
+    build: .
+    container_name: fraud_streamlit_ui
+    command: streamlit run app/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - API_URL=http://flask_api:5000
+    depends_on:
+      - flask_api
+
+volumes:
+  postgres_data:

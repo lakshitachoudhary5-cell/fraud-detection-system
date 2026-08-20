@@ -1,0 +1,18 @@
+﻿services:
+  - type: web
+    name: fraud-detection-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+
+  - type: web
+    name: fraud-detection-dashboard
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app/streamlit_app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
