@@ -1,87 +1,74 @@
+﻿import streamlit as st
+import pandas as pd
 import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-import streamlit as st
-import requests
-import pandas as pd
+from src.predict import FraudPredictor
+from app.database import save_prediction, get_recent_predictions
 
-API_URL = "http://127.0.0.1:5000"
-
-st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 
 st.title("🛡️ Real-Time Credit Card Fraud Detection System")
-st.markdown("Enter transaction details below to evaluate anomaly and fraud risk scores.")
 
 st.sidebar.header("Navigation")
 page = st.sidebar.radio("Select View", ["Single Prediction", "Transaction History"])
 
-if page == "Single Prediction":
-    st.subheader("Transaction Analysis")
+@st.cache_resource
+def load_predictor():
+    return FraudPredictor()
 
+predictor = load_predictor()
+
+if page == "Single Prediction":
+    st.header("Transaction Analysis")
+    
     col1, col2 = st.columns(2)
     with col1:
-        time_val = st.number_input("Transaction Time (Seconds)", min_value=0.0, value=100.0, step=1.0)
+        time_val = st.number_input("Transaction Time (Seconds)", value=100.0)
     with col2:
-        amount_val = st.number_input("Transaction Amount ($)", min_value=0.0, value=250.0, step=0.5)
+        amount_val = st.number_input("Transaction Amount ($)", value=250.0)
 
-    with st.expander("Advanced Features (PCA V1-V28 Values) - Optional"):
-        st.caption("Default value for PCA features is 0.0 unless modified.")
-        pca_inputs = {}
-        cols = st.columns(4)
+    pca_inputs = {}
+    with st.expander("Advanced Features (PCA V1-V28) - Optional"):
+        col_a, col_b = st.columns(2)
         for i in range(1, 29):
-            col_idx = (i - 1) % 4
-            with cols[col_idx]:
-                pca_inputs[f"V{i}"] = st.number_input(f"V{i}", value=0.0, step=0.1, key=f"v{i}")
+            with col_a if i <= 14 else col_b:
+                pca_inputs[f"V{i}"] = st.number_input(f"V{i}", value=0.0, key=f"v_{i}")
 
     if st.button("Predict Fraud Risk", type="primary"):
-        payload = {"Time": time_val, "Amount": amount_val}
+        payload = {f"V{i}": 0.0 for i in range(1, 29)}
+        payload.update({"Time": time_val, "Amount": amount_val})
         payload.update(pca_inputs)
-
+        
         try:
-            res = requests.post(f"{API_URL}/predict", json=payload)
-            if res.status_code == 200:
-                data = res.json()
-                
-                st.divider()
-                st.subheader("Prediction Result")
-                
-                res_col1, res_col2, res_col3 = st.columns(3)
-                
-                with res_col1:
-                    if data["is_fraud"]:
-                        st.error("🚨 ALERT: Fraudulent / Suspicious")
-                    else:
-                        st.success("✅ LEGITIMATE")
-                
-                with res_col2:
-                    st.metric(label="Anomaly Score", value=data["anomaly_score"])
-                
-                with res_col3:
-                    st.metric(label="DB Record ID", value=data.get("db_record_id", "N/A"))
-
+            result = predictor.predict_single(payload)
+            record_id = save_prediction(time_val, amount_val, result)
+            result["db_record_id"] = record_id
+            
+            if result.get("is_fraud"):
+                st.error(f"🚨 ALERT: Fraudulent Transaction Detected! (Score: {result.get('anomaly_score', 0):.4f})")
             else:
-                st.error(f"API Error: {res.json().get('error', 'Unknown Error')}")
+                st.success(f"✅ Transaction Legitimate (Score: {result.get('anomaly_score', 0):.4f})")
+            
+            st.write("**Prediction Details:**")
+            st.json(result)
         except Exception as e:
-            st.error(f"Could not connect to Flask API backend. Ensure API is running. Error: {e}")
+            st.error(f"Prediction Error: {e}")
 
 elif page == "Transaction History":
-    st.subheader("Recent Database Logs")
-    limit = st.slider("Records to fetch", min_value=5, max_value=50, value=10)
-
+    st.header("Recent Database Logs")
+    limit = st.slider("Records to fetch", 5, 50, 10)
+    
     if st.button("Refresh History"):
         try:
-            res = requests.get(f"{API_URL}/history?limit={limit}")
-            if res.status_code == 200:
-                records = res.json().get("predictions", [])
-                if records:
-                    df_hist = pd.DataFrame(records)
-                    st.dataframe(df_hist, use_container_width=True)
-                else:
-                    st.info("No records found in database.")
+            records = get_recent_predictions(limit=limit)
+            if records:
+                df = pd.DataFrame(records)
+                st.dataframe(df, use_container_width=True)
             else:
-                st.error("Failed to retrieve history from backend API.")
+                st.warning("No records found in database. Make a prediction first!")
         except Exception as e:
-            st.error(f"Connection error: {e}")
+            st.error(f"Error fetching history: {e}")
